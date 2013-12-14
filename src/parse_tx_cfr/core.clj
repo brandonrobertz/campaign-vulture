@@ -1,5 +1,6 @@
 ;;;; (c) 2013 Bradon Robertz ... RIP EWOK VDB
 ;;;; GPLv3+ (I'm considering Snowtide PDFTextStream a system lib for now)
+(System/setProperty "pdfts.layout.detectTables" "N")
 (ns parse-tx-cfr.core
   (:gen-class)
   (:use [parse-tx-cfr similarity])
@@ -8,7 +9,7 @@
             [clojure.java.io :as io]
             [clojure.tools.cli :as clitools])
   (:import [com.snowtide.pdf OutputTarget RegionOutputTarget
-                             PDFTextStream Page]
+                             PDFTextStream Page PDFTextStreamConfig]
            [com.snowtide.pdf.layout BlockParent Block Line]))
 
 ;;; NOTE:
@@ -125,12 +126,35 @@
         line))
     lines))
 
+(defn page->infomap_OLD
+  "Take a page and convert the structured information into lists of lists
+   of strings, representing the heriarchy of the document's structure."
+   [^Page pg]
+   (->> (.getTextContent pg)
+        (blocks)
+        (lines)
+        (lines->infomap)
+        (flatten)))
+
+(defn walk-blocks
+  "Same as above, make sure that we recursivley pull out all lines from blocks"
+  [blox]
+  (for [i   (range (count blox))
+        :let [blk (nth blox i)
+              cnt (.getChildCnt blk)]]
+    (if (= 0 cnt)
+      blk
+      (for [c (range cnt)]
+        (.getChild blk c)))))
+
 (defn page->infomap
   "Take a page and convert the structured information into lists of lists
    of strings, representing the heriarchy of the document's structure."
    [^Page pg]
    (->> (.getTextContent pg)
         (blocks)
+        (walk-blocks)
+        (flatten)
         (lines)
         (lines->infomap)
         (flatten)))
@@ -477,6 +501,10 @@
     (def stream (get-stream "data/2012CFRpts.pdf"))
     (catch Exception e (println "stream already defined"))))
 
+(defn setup
+  "Set some system-wide configuration options for PDFTextStream"
+  [])
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  CLI  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -523,6 +551,7 @@
 
 (defn -main
   [& args]
+  (setup)
   (let [[options arguments summary] (parse-args args)]
     (println "Selected options:")
     (println "  mode:      " (:mode options false))
