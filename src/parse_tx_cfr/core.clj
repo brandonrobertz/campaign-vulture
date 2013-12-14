@@ -5,7 +5,9 @@
   (:use [parse-tx-cfr similarity])
   (:require [clojure.string :as string]
             [clojure.data.csv :as csv]
-            [clojure.java.io :as io])
+            [clojure.java.io :as io]
+            [clojure.data.json :as json]
+            [clojure.tools.cli :as clitools])
   (:import [com.snowtide.pdf OutputTarget RegionOutputTarget
                              PDFTextStream Page]
            [com.snowtide.pdf.layout BlockParent Block Line]))
@@ -259,6 +261,15 @@
     ;NOTE just plugged in fuzzy matching here, can remove here 2
     (into {:txt s1} (delta-fuzzy pg cfg s1 s2))))
 
+(defn delta-from-config
+  "Returns a delta based on a specific config."
+  [config]
+  (println "Generating delta from config file" (:filename config))
+  (let [stream     (get-stream (:filename config))
+        example-pg (get-pg stream (:config-page config))
+        deltas     (batch-deltas config example-pg)]
+    deltas))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;                    ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;  G E T  S T U F F  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -350,9 +361,10 @@
 ;;; PDF "DOM" and lets the user click on & select the lines to use as examples.
 
 (defn config
-  "This is a placeholder config. For use with data/test.pdf page #10"
+  "This is a placeholder config. For use with data/test.pdf page 10"
   []
-  {:recs-per-pg 5
+  {:filename   "data/2012CFRpts.pdf"
+   :recs-per-pg 5
    :config-page 2
    :cfg [["Full name of contributor"    "Acuna, Gerard"]
          ["Contributor address"         "PO Box 26499"]
@@ -361,6 +373,19 @@
          ["Employer (See Instructions)" "TRI Recycling Inc"]
          ["Principal occupation / Job title (See Instructions)"
           "President"]]})
+
+(defn to-file
+  "Save a clojure form to a file"
+  [filename form]
+  (with-open [w (java.io.FileWriter. filename)]
+    (print-dup form w)))
+
+(defn from-file
+  "Load a clojure form from file."
+  [filename]
+  (println "Loading saved config" filename)
+  (with-open [r (java.io.PushbackReader. (java.io.FileReader. filename))]
+    (read r)))
 
 ;;;;  W R I T E  2  C S V  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn clean-up
@@ -389,6 +414,15 @@
 ;;;;  M A I N  F U N C T I O N S  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;                              ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn build-config-deltafile
+  "Builds delta and saves it (with config), based on a given config"
+  [config config-filename delta-filename]
+  (do
+    (println "Writing config to:" config-filename)
+    (to-file config-filename config)
+    (println "Writing delta to:" delta-filename)
+    (to-file delta-filename (delta-from-config config))))
+
 (defn scrape-page
   "Scrape data off page in PDF stream, specified by cfg."
   [pg cfg deltas]
@@ -408,18 +442,104 @@
                  pg (get-pg stream n)]]
        (scrape-page pg cfg deltas)))))
 
+(defn scrape-pages-delta
+  "Scrape a range of pages, using a specific config file, which is
+   supplied as an arg (presumably from a stored config)"
+  [stream config delta start end]
+  (join-pages
+   (for [n (range start end)
+         :let [nil1 (println "Extracting contributors on page" n)
+               pg (get-pg stream n)]]
+     (scrape-page pg config delta))))
+
 ; for convenience in coding ... due to multiproc restrictions
 ; w/ snowtide, it's easier to use a global instance
-(try
-  (def stream (get-stream "data/2012CFRpts.pdf"))
-  (catch Exception e (println "stream already defined")))
+(defn global-stream  "Load a global stream instance." []
+  (try
+    (def stream (get-stream "data/2012CFRpts.pdf"))
+    (catch Exception e (println "stream already defined"))))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;  CLI  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn parse-args
+  "Parse out args and return the resulting [options arguments summary]"
+  [args]
+  (clitools/cli
+   args
+   ["-m"  "--mode"
+      (apply str "parse-tx-cfr has two modes:"
+             " 'parse' and 'config'. Parse mode is the "
+             " main mode, but it depends on having"
+             " config files built from config mode.")]
+   ["-c"  "--config"        "Save/load a pre-built config file"]
+   ["-d"  "--delta"         "Save/load a pre-build delta file"]
+   ["-h"  "--help"]))
+
+(defn usage [options-summary]
+  (->> ["Extract contributor information from a PDF campaign finance report"
+        ""
+        "Usage: parse-tx-cfr [options] infile outfile start end"
+        ""
+        "Options:"
+        options-summary
+        ""
+        "Parse mode arguments:"
+        "  infile   Input PDF to extract contributor information from"
+        "  outfile  Output CSV to write contributor information to"
+        "  start    Page to start extracting on (zero indexed)"
+        "  end      Last page to extract information from (zero indexed)"
+        ""]
+              (string/join \newline)))
+
+(defn exit [status msg]
+  (println msg)
+  (System/exit status))
 
 (defn -main
-  "I don't do a whole lot ... yet."
   [& args]
-  ;; work around dangerous default behaviour in Clojure
-  (alter-var-root #'*read-eval* (constantly false))
-  (demo))
+  (let [[options arguments summary] (parse-args args)]
+    (println "mode:" (:mode options))
+    (println "config" (:config options))
+    (println "delta"  (:delta options))
+    ;; HELP / USAGE
+    (if (:help options) (exit 0 (usage summary)))
+    ;; MODE (make sure we have a mode and config and delta)
+    (if (and (:mode options false)
+             (:config options false)
+             (:delta  options false))
+      (cond
+       ;; PARSE MODE (make sure we have 4 args)
+       (and (= (:mode options) "parse")
+            (= 4 (count arguments)))
+       ;; execute scrape-pages (with sloppy debug output)
+       (let [debug1  (println "Entering parse mode")
+             infile  (nth arguments 0)
+             outfile (nth arguments 1)
+             stream  (get-stream infile)
+             config  (from-file  (:config options))
+             delta   (from-file  (:delta  options))
+             start   (Integer/parseInt (nth arguments 2))
+             end     (Integer/parseInt (nth arguments 3))
+             debug2  (println "Parsing pages" start "through" end
+                              "of" infile "to" outfile)]
+         (write-out outfile
+                    (clean-up
+                     (scrape-pages-delta stream config delta start end) 3)))
+       ;; CONFIG-BUILD MODE
+       (= (:mode options) "config")
+       (let [nil1 (println "Entering config mode")]
+         (build-config-deltafile
+          (config)
+          (:config options)
+          (:delta options)))
+       :else (do (println "options:" options)
+                 (println "arguments:" arguments)
+                 (println (usage summary))
+                 (exit 1 (usage summary))))))
+  (println "Done! Exiting."))
 
 ;;;; LEE LEFFINGWELL DEMONSTRATION ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
