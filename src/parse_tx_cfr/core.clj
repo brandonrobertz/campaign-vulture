@@ -1,5 +1,6 @@
 ;;;; (c) 2013 Bradon Robertz ... RIP EWOK VDB
 ;;;; GPLv3+ (I'm considering Snowtide PDFTextStream a system lib for now)
+;; this needs to be set before pdftextstream is loaded at all
 (System/setProperty "pdfts.layout.detectTables" "N")
 (ns parse-tx-cfr.core
   (:gen-class)
@@ -184,23 +185,6 @@
   ;(do (println "c:" c) (println "m:" m) (flush)) ;DEBUG
   (apply min-key #(dist ((juxt :x :y) c) ((juxt :x :y) %)) (remove #(= c %) m)))
 
-;;;; TRUTH ;;;;
-(defn contributors?
-  "Check a list to see if it contains phrases that indicate we're looking
-   at a page that contains contribution information."
-  [l]
-  (and
-   (> (count (filter #(re-find #"SCHEDULE" %)
-                    (flatten (map #(:txt %) l)))) 0)
-   (> (count (filter #(re-find #"OTHER\s+THAN\s+PLEDGES" %)
-                     (flatten (map #(:txt %) l)))) 0)))
-
-(defn contributors-pg?
-  "Checks wether or not a page is a contributor page. Wrapper for
-  contributors? function."
-  [pg]
-  (contributors? (page->infomap pg)))
-
 (defn header-contributor?
   "Check a string/infomap to see if it contains the contributor header."
   [m]
@@ -365,7 +349,7 @@
         :let [txt (:txt x)
               dy  (:dy  x)
               dx  (:dx  x)
-              w 200
+              w 250
               h 5]]
     (vals-by-header-fuzzy pg cfg txt dy dx w h)))
 
@@ -380,6 +364,50 @@
   "Turn our one list w/ vectors per page to one long vector list."
   [l]
   (filter vector? (tree-seq seq? identity l)))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;                 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;  RANGE FINDING  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;                 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(defn contributors?
+  "Check a list to see if it contains phrases that indicate we're looking
+   at a page that contains contribution information."
+  [l]
+  (and
+   (> (count (filter #(re-find #"SCHEDULE" %)
+                    (flatten (map #(:txt %) l)))) 0)
+   (> (count (filter #(re-find #"OTHER\s+?THAN\s+?PLEDGES" %)
+                     (flatten (map #(:txt %) l)))) 0)))
+
+(defn contributors-pg-OLD?
+  "Checks wether or not a page is a contributor page. Wrapper for
+  contributors? function."
+  [pg]
+  (contributors? (page->infomap pg)))
+
+(defn contributors-pg?
+  [pg]
+  (< 0.8
+     (similarity "OTHER THAN PLEDGES OR LOANS"
+                 (:txt (first (find-by-str-fuzzy
+                               pg "OTHER THAN PLEDGES OR LOANS" 1))))))
+
+(defn auto-range
+  "Return a range of pages to scrape, based on calls to contributors-pg?"
+  [stream]
+  (println "Calculating auto-range")
+  (let [n     (num-pages stream)
+        r     (for [c (range (num-pages stream))
+                    :when (contributors-pg? (get-pg stream c))] c)]
+    (if (> (count r) 0)
+      ;; calculate range based on min/max
+      (let [min-r (first (sort < r))
+            max-r (first (sort > r))]
+        (range min-r (+ 1 max-r)))
+      ;; No pages
+      (range 0))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;                     ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -474,24 +502,13 @@
                  pg (get-pg stream n)]]
        (scrape-page pg cfg deltas)))))
 
-(defn scrape-pages-delta
-  "Scrape a range of pages, using a specific config file, which is
-   supplied as an arg (presumably from a stored config)"
-  [stream config delta start end]
-  (join-pages
-   (for [n (range start end)
-         :let [nil1 (println "Extracting contributors on page" n)
-               pg (get-pg stream n)]]
-     (scrape-page pg config delta))))
-
-(defn scrape-pages-auto-range
+(defn scrape-pages-wrapper
   "Scrape a document, looking at each to dermine if it's a contributor page.
    Uses given config and delta structs."
-  [stream config delta]
+  [stream config delta range]
   (join-pages
-   (for [n (range (num-pages stream))
-         :let [pg (get-pg stream n)]
-         :when (contributors-pg? pg)]
+   (for [n range ;(range (num-pages stream))
+         :let [pg (get-pg stream n)]]
      (do
        ;; DEBUG OUTPUT
        (println "Extracting contributors on page" n)
@@ -503,10 +520,6 @@
   (try
     (def stream (get-stream "data/2012CFRpts.pdf"))
     (catch Exception e (println "stream already defined"))))
-
-(defn setup
-  "Set some system-wide configuration options for PDFTextStream"
-  [])
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -554,7 +567,6 @@
 
 (defn -main
   [& args]
-  (setup)
   (let [[options arguments summary] (parse-args args)]
     (println "Selected options:")
     (println "  mode:      " (:mode options false))
@@ -592,13 +604,19 @@
              (println "Manual range mode")
              (write-out outfile
                         (clean-up
-                         (scrape-pages-delta stream config delta start end) 3)))
+                         (scrape-pages-wrapper stream
+                                               config
+                                               delta
+                                               (range start end)) 3)))
            ;; Auto range
            (do
              (println "Auto-range mode")
              (write-out outfile
                         (clean-up
-                         (scrape-pages-auto-range stream config delta) 3)))))
+                         (scrape-pages-wrapper stream
+                                               config
+                                               delta
+                                               (auto-range stream)) 3)))))
        ;; CONFIG-BUILD MODE
        (= (:mode options) "config")
        (let [nil1 (println "Entering config mode")]
