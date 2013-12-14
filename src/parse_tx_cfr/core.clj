@@ -6,7 +6,6 @@
   (:require [clojure.string :as string]
             [clojure.data.csv :as csv]
             [clojure.java.io :as io]
-            [clojure.data.json :as json]
             [clojure.tools.cli :as clitools])
   (:import [com.snowtide.pdf OutputTarget RegionOutputTarget
                              PDFTextStream Page]
@@ -162,12 +161,18 @@
   (apply min-key #(dist ((juxt :x :y) c) ((juxt :x :y) %)) (remove #(= c %) m)))
 
 ;;;; TRUTH ;;;;
-
 (defn contributors?
   "Check a list to see if it contains phrases that indicate we're looking
    at a page that contains contribution information."
   [l]
-  (if (filter #(re-find #"CONTRIBUTIONS" %) (flatten l)) true false))
+  (> (count (filter #(re-find #"OTHER\s+THAN\s+PLEDGES" %)
+                    (flatten (map #(:txt %) l)))) 0))
+
+(defn contributors-pg?
+  "Checks wether or not a page is a contributor page. Wrapper for
+  contributors? function."
+  [pg]
+  (contributors? (page->infomap pg)))
 
 (defn header-contributor?
   "Check a string/infomap to see if it contains the contributor header."
@@ -452,6 +457,19 @@
                pg (get-pg stream n)]]
      (scrape-page pg config delta))))
 
+(defn scrape-pages-auto-range
+  "Scrape a document, looking at each to dermine if it's a contributor page.
+   Uses given config and delta structs."
+  [stream config delta]
+  (join-pages
+   (for [n (range (num-pages stream))
+         :let [pg (get-pg stream n)]
+         :when (contributors-pg? pg)]
+     (do
+       ;; DEBUG OUTPUT
+       (println "Extracting contributors on page" n)
+       (scrape-page pg config delta)))))
+
 ; for convenience in coding ... due to multiproc restrictions
 ; w/ snowtide, it's easier to use a global instance
 (defn global-stream  "Load a global stream instance." []
@@ -470,12 +488,17 @@
   (clitools/cli
    args
    ["-m"  "--mode"
-      (apply str "parse-tx-cfr has two modes:"
-             " 'parse' and 'config'. Parse mode is the "
-             " main mode, but it depends on having"
+      (apply str "parse-tx-cfr has two modes:\n\t\t\t\t"
+             " 'parse' and 'config'. Parse mode is the\n\t\t\t\t"
+             " main mode, but it depends on having\n\t\t\t\t"
              " config files built from config mode.")]
    ["-c"  "--config"        "Save/load a pre-built config file"]
    ["-d"  "--delta"         "Save/load a pre-build delta file"]
+   ["-r"  "--auto-range"    (apply str "Try to automatically find\n\t\t\t\t"
+                                   "range of contributor information\n\t\t\t\t"
+                                   "Note: This may fail without warning.")
+    :parse-fn #(boolean %)
+    :default false]
    ["-h"  "--help"]))
 
 (defn usage [options-summary]
@@ -501,19 +524,21 @@
 (defn -main
   [& args]
   (let [[options arguments summary] (parse-args args)]
-    (println "mode:" (:mode options))
-    (println "config" (:config options))
-    (println "delta"  (:delta options))
+    (println "Selected options:")
+    (println "  mode:      " (:mode options false))
+    (println "  config:    " (:config options false))
+    (println "  delta:     " (:delta options false))
+    (println "  auto-range:" (:auto-range options false))
+    (println (count arguments) "Arguments:\n" arguments)
     ;; HELP / USAGE
-    (if (:help options) (exit 0 (usage summary)))
+    (if (:help options false) (exit 0 (usage summary)))
     ;; MODE (make sure we have a mode and config and delta)
-    (if (and (:mode options false)
+    (if (and (:mode   options false)
              (:config options false)
              (:delta  options false))
       (cond
        ;; PARSE MODE (make sure we have 4 args)
-       (and (= (:mode options) "parse")
-            (= 4 (count arguments)))
+       (= (:mode options) "parse")
        ;; execute scrape-pages (with sloppy debug output)
        (let [debug1  (println "Entering parse mode")
              infile  (nth arguments 0)
@@ -521,13 +546,27 @@
              stream  (get-stream infile)
              config  (from-file  (:config options))
              delta   (from-file  (:delta  options))
-             start   (Integer/parseInt (nth arguments 2))
-             end     (Integer/parseInt (nth arguments 3))
+             start   (if (= (count arguments) 4)
+                       (Integer/parseInt (nth arguments 2)))
+             end     (if (= (count arguments) 4)
+                       (Integer/parseInt (nth arguments 3)))
              debug2  (println "Parsing pages" start "through" end
                               "of" infile "to" outfile)]
-         (write-out outfile
-                    (clean-up
-                     (scrape-pages-delta stream config delta start end) 3)))
+         ;; MANUAL vs AUTO-RANGE MODE based on auto-range opt & num of args
+         (if (and (false? (:auto-range options false))
+                  (= 4 (count arguments)))
+           ;; Manual range
+           (do
+             (println "Manual range mode")
+             (write-out outfile
+                        (clean-up
+                         (scrape-pages-delta stream config delta start end) 3)))
+           ;; Auto range
+           (do
+             (println "Auto-range mode")
+             (write-out outfile
+                        (clean-up
+                         (scrape-pages-auto-range stream config delta) 3)))))
        ;; CONFIG-BUILD MODE
        (= (:mode options) "config")
        (let [nil1 (println "Entering config mode")]
