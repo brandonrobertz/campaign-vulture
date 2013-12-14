@@ -32,8 +32,14 @@ future, this will become more flexible and user-friendly.
 Once our config files have been generated, we can use them to parse our
 PDF:
 
-    lein run -- -m parse -c config.cfg -d delta.cfg data/2012CFRpts.pdf
-    out.csv 2 10
+    lein run -- -m parse -c config.cfg -d delta.cfg data/2012CFRpts.pdf out.csv 2 10
+
+Or if we want the parser to try and guess a range of contributor pages,
+we can supply the `-r true` argument (this currently looks for a fuzzy match
+of the string "other than pledges or loans", which will be configurable in the
+future):
+
+    lein run -- -m parse -c config.cfg -d delta.cfg -r true data/2012CFRpts.pdf out.csv
 
 Running this will write a CSV file to out.csv which contains the
 information from a contributor cell in `data/test.pdf`. I don't clean up
