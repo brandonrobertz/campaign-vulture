@@ -139,13 +139,14 @@
 (defn walk-blocks
   "Same as above, make sure that we recursivley pull out all lines from blocks"
   [blox]
-  (for [i   (range (count blox))
-        :let [blk (nth blox i)
-              cnt (.getChildCnt blk)]]
-    (if (= 0 cnt)
-      blk
-      (for [c (range cnt)]
-        (.getChild blk c)))))
+  (flatten
+   (for [i   (range (count blox))
+         :let [blk (nth blox i)
+               cnt (.getChildCnt blk)]]
+     (if (= 0 cnt)
+       blk
+       (for [c (range cnt)]
+         (.getChild blk c))))))
 
 (defn page->infomap
   "Take a page and convert the structured information into lists of lists
@@ -154,7 +155,6 @@
    (->> (.getTextContent pg)
         (blocks)
         (walk-blocks)
-        (flatten)
         (lines)
         (lines->infomap)
         (flatten)))
@@ -189,8 +189,11 @@
   "Check a list to see if it contains phrases that indicate we're looking
    at a page that contains contribution information."
   [l]
-  (> (count (filter #(re-find #"OTHER\s+THAN\s+PLEDGES" %)
-                    (flatten (map #(:txt %) l)))) 0))
+  (and
+   (> (count (filter #(re-find #"SCHEDULE" %)
+                    (flatten (map #(:txt %) l)))) 0)
+   (> (count (filter #(re-find #"OTHER\s+THAN\s+PLEDGES" %)
+                     (flatten (map #(:txt %) l)))) 0)))
 
 (defn contributors-pg?
   "Checks wether or not a page is a contributor page. Wrapper for
