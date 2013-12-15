@@ -13,6 +13,11 @@
                              PDFTextStream Page PDFTextStreamConfig]
            [com.snowtide.pdf.layout BlockParent Block Line]))
 
+;;; TODO:
+;;; 1. There is a lot of room for optimization here. For example, we should
+;;; only run page->infomap once per page we're operating on. Currently,
+;;; different functions run it independently.
+
 ;;; NOTE:
 ;;; Right now I'm using snowtide's PDFTextStream library. I will
 ;;; change to Apache PDFBox of possibly iText, because of the single-
@@ -506,13 +511,17 @@
   "Scrape a document, looking at each to dermine if it's a contributor page.
    Uses given config and delta structs."
   [stream config delta range]
-  (join-pages
-   (for [n range ;(range (num-pages stream))
-         :let [pg (get-pg stream n)]]
-     (do
-       ;; DEBUG OUTPUT
-       (println "Extracting contributors on page" n)
-       (scrape-page pg config delta)))))
+  (if-not
+      (nil? (first range))
+    (do
+      (println "Parsing pages" (first range) "through" (last range))
+      (join-pages
+       (for [n range ;(range (num-pages stream))
+             :let [pg (get-pg stream n)]]
+         (do
+           ;; DEBUG OUTPUT
+           (println "Extracting contributors on page" n)
+           (scrape-page pg config delta)))))))
 
 ; for convenience in coding ... due to multiproc restrictions
 ; w/ snowtide, it's easier to use a global instance
@@ -565,6 +574,57 @@
   (println msg)
   (System/exit status))
 
+(defn run
+  "When passed args from -main, this function will parse the arguments
+   and take action based on options chosen."
+  [args]
+  (let [[options arguments summary] (parse-args args)]
+    (println "Selected options:")
+    (println "  mode:      " (:mode options false))
+    (println "  config:    " (:config options false))
+    (println "  delta:     " (:delta options false))
+    (println "  auto-range:" (:auto-range options false))
+    (println (count arguments) "Arguments:\n" arguments)
+    ;; HELP / USAGE
+    (if (:help options false) (exit 0 (usage summary)))
+    ;; MODE (make sure we have a mode and config and delta)
+    (if (and (:mode   options false)
+             (:config options false)
+             (:delta  options false))
+      (cond
+       ;; PARSE MODE (make sure we have 4 args)
+       (= (:mode options) "parse")
+       ;; execute scrape-pages (with sloppy debug output)
+       (let [debug1  (println "Entering parse mode")
+             infile  (nth arguments 0)
+             outfile (nth arguments 1)
+             stream  (get-stream infile)
+             config  (from-file  (:config options))
+             delta   (from-file  (:delta  options))
+             start   (if (= (count arguments) 4)
+                       (Integer/parseInt (nth arguments 2)))
+             end     (if (= (count arguments) 4)
+                       (Integer/parseInt (nth arguments 3)))
+             range   (if (and
+                          (false? (:auto-range options false))
+                          (= 4 (count arguments)))
+                       (range start end)
+                       (auto-range stream))]
+         (write-out outfile (clean-up
+                             (scrape-pages-wrapper stream
+                                                   config
+                                                   delta
+                                                   range) 3)))
+       ;; CONFIG-BUILD MODE
+       (= (:mode options) "config")
+       (do
+         (println "Entering config mode")
+         (build-config-deltafile (config) (:config options) (:delta options)))
+       :else (do (println "options:" options)
+                 (println "arguments:" arguments)
+                 (println (usage summary))
+                 (exit 1 (usage summary)))))))
+
 (defn -main
   [& args]
   (let [[options arguments summary] (parse-args args)]
@@ -597,8 +657,8 @@
              debug2  (println "Parsing pages" start "through" end
                               "of" infile "to" outfile)]
          ;; MANUAL vs AUTO-RANGE MODE based on auto-range opt & num of args
-         (if (and (false? (:auto-range options false))
-                  (= 4 (count arguments)))
+         (if (and (false? (:auto-range options false)) ; this can be converted
+                  (= 4 (count arguments)))             ; to a range var above
            ;; Manual range
            (do
              (println "Manual range mode")
