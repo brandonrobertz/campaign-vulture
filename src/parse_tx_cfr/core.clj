@@ -354,8 +354,9 @@
         :let [txt (:txt x)
               dy  (:dy  x)
               dx  (:dx  x)
-              w 250
-              h 5]]
+              w   (if (:w x false) (:w x) 250) ; if supplied width, else 250
+              h   (if (:h x false) (:h x)   5) ; same, but defaults to 5
+              ]]
     (vals-by-header-fuzzy pg cfg txt dy dx w h)))
 
 (defn restruct
