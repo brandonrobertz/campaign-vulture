@@ -2,6 +2,7 @@
 ;;;; GPLv3+ (I'm considering Snowtide PDFTextStream a system lib for now)
 ;; this needs to be set before pdftextstream is loaded at all
 (System/setProperty "pdfts.layout.detectTables" "N")
+;(System/setProperty "pdfts_license_path" "/home/uzr/pdftextstream.license")
 (ns parse-tx-cfr.core
   (:gen-class)
   (:use [parse-tx-cfr similarity])
@@ -354,6 +355,7 @@
         :let [txt (:txt x)
               dy  (:dy  x)
               dx  (:dx  x)
+              ;; THESE can be converted to (:w x default_val)
               w   (if (:w x false) (:w x) 250) ; if supplied width, else 250
               h   (if (:h x false) (:h x)   5) ; same, but defaults to 5
               ]]
@@ -438,7 +440,8 @@
          ["Amount of contribution ($)"  "$350.00"]
          ["Employer (See Instructions)" "TRI Recycling Inc"]
          ["Principal occupation / Job title (See Instructions)"
-          "President"]]})
+          "President"]
+         ["Date"                        "12/30/2011"]]})
 
 (defn to-file
   "Save a clojure form to a file"
@@ -454,19 +457,57 @@
     (read r)))
 
 ;;;;  W R I T E  2  C S V  ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+(defn clean-money-OLD
+  "Clean up a dollar string"
+  [s]
+  (-> (string/upper-case s)
+      (string/trim-newline)
+      (string/replace #"\r|\n|\s" "")
+      (string/trim)
+      ;; if we have a char, long string of whitespace, then more chars
+      ;; we should split it at the whitespace, take rightmost part
+      (string/replace #"[|1IL]\s{3,}(.+)" "$1")
+      ;; first char should _always_ be dollar sign, strip it
+      (rest)
+      ;; Common OCR number errors
+      (string/replace #"I"                     "1")
+      (string/replace #"L"                     "1")
+      (string/replace #"B"                     "8")
+      (string/replace #"S"                     "5")
+      (string/replace #"O"                     "0")
+      (string/replace #"[^0-9\.\,]"             "")
+      (string/replace #"\,"                    ".")
+      (string/replace #"^(.+\.)(.{2})(.*)"  "$1$2")))
+
+(defn correct-number-ocr
+  "Take a pre-parsed, assumed number string and convert letters inside to numbers."
+  [s]
+  (-> (string/replace s #"I" "1")
+      (string/replace   #"L" "1")
+      (string/replace   #"B" "8")
+      (string/replace   #"S" "5")
+      (string/replace   #"O" "0")))
+
+(defn clean-money
+  "Clean up a dollar string"
+  [s]
+  (let [s1 (string/replace (string/upper-case s) #"\r|\n|\s" "")]
+    (if (re-find #"\$" s1)
+      (correct-number-ocr (re-find #"\$[0-9OISBL]{1,3}[.|,][0-9OISBL]{0,2}" s1))
+      (clean-money-OLD s))))
+
 (defn clean-up
   [scraped-info amount-col-num]
+  (println "cleaning up")
   (map #(map-indexed (fn [i s]
                        (if (= i amount-col-num)
-                         (string/upper-case
-                          (string/replace
-                           (string/trim-newline
-                            (string/trim
-                             (string/replace s #"\." "."))) #"[^0-9.]" ""))
+                         ;; is a dollar field
+                         (clean-money s)
+                         ;; is a string field
                          (string/upper-case
                           (string/trim-newline
                            (string/trim
-                            (string/replace s #"[^A-Za-z0-9 -,. ]" ""))))))
+                            (string/replace s #"[^A-Za-z0-9/ -,. ]" ""))))))
                      %)
        scraped-info))
 
@@ -537,25 +578,30 @@
 ;;;;       ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn parse-args
-  "Parse out args and return the resulting [options arguments summary]"
+  "Parse out args and return the resulting [options arguments summary]. Wraps
+   the tools.cli cli function."
   [args]
   (clitools/cli
    args
    ["-m"  "--mode"
-      (apply str "parse-tx-cfr has two modes:\n\t\t\t\t"
-             " 'parse' and 'config'. Parse mode is the\n\t\t\t\t"
-             " main mode, but it depends on having\n\t\t\t\t"
-             " config files built from config mode.")]
+    (apply str
+           "parse-tx-cfr has two modes:\n\t\t\t\t"
+           " 'parse' and 'config'. Parse mode is the\n\t\t\t\t"
+           " main mode, but it depends on having\n\t\t\t\t"
+           " config files built from config mode.")]
    ["-c"  "--config"        "Save/load a pre-built config file"]
    ["-d"  "--delta"         "Save/load a pre-build delta file"]
-   ["-r"  "--auto-range"    (apply str "Try to automatically find\n\t\t\t\t"
+   ["-r"  "--auto-range"    (apply str
+                                   "Try to automatically find\n\t\t\t\t"
                                    "range of contributor information\n\t\t\t\t"
                                    "Note: This may fail without warning.")
     :parse-fn #(boolean %)
     :default false]
    ["-h"  "--help"]))
 
-(defn usage [options-summary]
+(defn usage
+  "Return usage info"
+  [options-summary]
   (->> ["Extract contributor information from a PDF campaign finance report"
         ""
         "Usage: parse-tx-cfr [options] infile outfile start end"
@@ -569,9 +615,21 @@
         "  start    Page to start extracting on (zero indexed)"
         "  end      Last page to extract information from (zero indexed)"
         ""]
-              (string/join \newline)))
+       (string/join \newline)))
 
-(defn exit [status msg]
+(defn print-info
+  "Print some basic info about chosen options"
+  [options arguments summary]
+  (println "Selected options:")
+  (println "  mode:      " (:mode options false))
+  (println "  config:    " (:config options false))
+  (println "  delta:     " (:delta options false))
+  (println "  auto-range:" (:auto-range options false))
+  (println (count arguments) "Arguments:\n" arguments))
+
+(defn exit
+  "Print a message and exit with a specified code"
+  [status msg]
   (println msg)
   (System/exit status))
 
@@ -580,12 +638,7 @@
    and take action based on options chosen."
   [args]
   (let [[options arguments summary] (parse-args args)]
-    (println "Selected options:")
-    (println "  mode:      " (:mode options false))
-    (println "  config:    " (:config options false))
-    (println "  delta:     " (:delta options false))
-    (println "  auto-range:" (:auto-range options false))
-    (println (count arguments) "Arguments:\n" arguments)
+    (print-info options arguments  summary)
     ;; HELP / USAGE
     (if (:help options false) (exit 0 (usage summary)))
     ;; MODE (make sure we have a mode and config and delta)
@@ -596,8 +649,7 @@
        ;; PARSE MODE (make sure we have 4 args)
        (= (:mode options) "parse")
        ;; execute scrape-pages (with sloppy debug output)
-       (let [debug1  (println "Entering parse mode")
-             infile  (nth arguments 0)
+       (let [infile  (nth arguments 0)
              outfile (nth arguments 1)
              stream  (get-stream infile)
              config  (from-file  (:config options))
@@ -621,10 +673,7 @@
        (do
          (println "Entering config mode")
          (build-config-deltafile (config) (:config options) (:delta options)))
-       :else (do (println "options:" options)
-                 (println "arguments:" arguments)
-                 (println (usage summary))
-                 (exit 1 (usage summary)))))))
+       :else (exit 1 (usage summary))))))
 
 (defn -main
   [& args]
