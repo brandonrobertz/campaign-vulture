@@ -1,0 +1,12 @@
+#=(clojure.lang.PersistentArrayMap/create
+{:cfg [["Full name of contributor" "Dennis McDaniel"]
+       ["Contributor address:" "906 Crystal Creek Drive"]
+       ["Contributor address:" "Austin, TX 78746"]
+       ["Amount of contribution ($)" "350.00"]
+       ["Employer (See Instructions)" "Retired"]
+       ["Principal occupation I Job lllle (Soc Instructions)"
+         "Human Resources"]
+       ["Full name of contributor" "4n/2009"]],
+:recs-per-pg 5,
+:config-page 6,
+:filename "/home/uzr/Desktop/research/tmp_pdfs/2009-05-01-leffingwell.pdf"})

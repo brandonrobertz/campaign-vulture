@@ -1,0 +1,11 @@
+({:txt "Full name of contributor", :dy 11.039993286132812, :dx 144.19 :w 110
+  :h 8}
+ {:txt "Contributor address:", :dy 17.279998779296875, :dx 143.55 :w 125}
+ {:txt "Contributor address:", :dy 29.520004272460938, :dx 144.01 :w 110}
+ {:txt "Amount of contribution ($)", :dy 34.54998779296875, :dx 388.27
+  :w 82 :h 10}
+ {:txt "Employer (See Instructions)", :dy 5.3499755859375, :dx 310.97}
+ {:txt "Principal occupation 1 Job title (See Instructions)",
+  :dy 5.3499755859375, :dx 55.97 :w 110}
+ {:txt "Full name of contributor", :dy 33.850006103515625, :dx 10.73 :w 108
+  :h 15})

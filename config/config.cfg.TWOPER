@@ -1,0 +1,12 @@
+#=(clojure.lang.PersistentArrayMap/create
+{:cfg [["5 Full name of contributor" "Chen, Jay"]
+       ["6 Contributor address:" "2148 Punta Del Este Drive"]
+       ["6 Contributor address:" "Hacienda Heights, CA91745"]
+       ["Amount of contribution ($)" "100.00"]
+       ["Employer (See Instructions)" "New World"]
+       ["Principal occupation I Job lllle (Soc Instructions)"
+         "Real Estate"]
+       ["Full name of contributor" "01/15/2009"]],
+:recs-per-pg 2,
+:config-page 2,
+:filename "/home/uzr/documents/unsorted_work/austin_city_campaign_finance/2009-04-09-cofer.pdf"})

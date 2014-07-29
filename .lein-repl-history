@@ -1,0 +1,45 @@
+(-main)
+(dotrace [vals-from-deltamaps delta find-by-str region->string] (vals-from-deltamaps pg dm))
+(vals-from-deltamaps pg (batch-deltas pg [["name of contributor" "byron"] ["utor address" "wooten"]]))
+(- x dx)
+(vals-from-deltamaps pg (batch-deltas pg [["name of contributor" "byron"] ["utor address" "wooten"]]))
+stream
+(- 219 75)
+(apply str "lol" "lol")
+(defn usage [options-summary]
+  (->> ["This is my program. There are many like it, but this one is mine."
+        ""
+        "Usage: program-name [options] action"
+        ""
+        "Options:"
+        options-summary
+        ""
+        "Actions:"
+        "  start    Start a new server"
+        "  stop     Stop an existing server"
+        "  status   Print a server's status"
+        ""
+        "Please refer to the manual page for more information."]
+       (string/join \newline)))
+(and (= 1 1) false)
+(and (= 1 1) false nil)
+(and (= 1 1) nil)
+(if "lol" 1)
+(if "lol" 1 nil)
+(-main
+)
+(bool "lol")
+(Bool. "lol")
+(boolean "lol")
+(def stream (get-stream "/home/uzr/mnt/Private/nexus/writing/research/austin_city_campaign_finance/20090115-cole.pdf"))
+(def pg3 (get-pg stream 3))
+(def stream (get-stream "/home/uzr/mnt/Private/nexus/writing/research/austin_city_campaign_finance/20090115-cole.pdf"))
+(System/getProperty "pdfts.layout.detectTables")
+(PDFTExtStreamConfig)
+(System/getProperty "pdfts.layout.detectTables")
+(def stream (get-stream "/home/uzr/mnt/Private/nexus/writing/research/austin_city_campaign_finance/20090115-cole.pdf"))
+(.close stream)
+(def stream (get-stream "/home/uzr/mnt/Private/nexus/writing/research/austin_city_campaign_finance/20090115-dunkerley.pdf"))
+(def stream (get-stream "/home/uzr/mnt/Private/nexus/writing/research/austin_city_campaign_finance/20090107-ingalls.pdf"))
+(identity 1)
+(identity {:a 1 :b 3})

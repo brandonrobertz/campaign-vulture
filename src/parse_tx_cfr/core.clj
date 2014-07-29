@@ -158,7 +158,7 @@
 (defn page->infomap
   "Take a page and convert the structured information into lists of lists
    of strings, representing the heriarchy of the document's structure."
-   [^Page pg]
+  [^Page pg]
    (->> (.getTextContent pg)
         (blocks)
         (walk-blocks)
@@ -365,12 +365,14 @@
   "Turn our one list per type of info to one-list per page, containing
    one vector per record."
   [m]
+  (println "restruct count:" (count m))
   (map #(apply vector (identity %))
        (partition (count m) (apply interleave m))))
 
 (defn join-pages
   "Turn our one list w/ vectors per page to one long vector list."
   [l]
+  (println "join-pages:" l)
   (filter vector? (tree-seq seq? identity l)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -441,7 +443,7 @@
          ["Employer (See Instructions)" "TRI Recycling Inc"]
          ["Principal occupation / Job title (See Instructions)"
           "President"]
-         ["Date"                        "12/30/2011"]]})
+         ["Full name of contributor"    "12/30/2011"]]})
 
 (defn to-file
   "Save a clojure form to a file"
@@ -460,6 +462,7 @@
 (defn clean-money-OLD
   "Clean up a dollar string"
   [s]
+  (println "cleaning OLD:" s)
   (-> (string/upper-case s)
       (string/trim-newline)
       (string/replace #"\r|\n|\s" "")
@@ -482,19 +485,37 @@
 (defn correct-number-ocr
   "Take a pre-parsed, assumed number string and convert letters inside to numbers."
   [s]
-  (-> (string/replace s #"I" "1")
-      (string/replace   #"L" "1")
-      (string/replace   #"B" "8")
-      (string/replace   #"S" "5")
-      (string/replace   #"O" "0")))
+  (if (nil? s)
+    ""
+    (do
+      (println "correcting" s)
+      (-> (string/replace s #"I" "1")
+          (string/replace   #"L" "1")
+          (string/replace   #"B" "8")
+          (string/replace   #"S" "5")
+          (string/replace   #"O" "0")))))
 
 (defn clean-money
   "Clean up a dollar string"
   [s]
+  (println "raw:" s)
   (let [s1 (string/replace (string/upper-case s) #"\r|\n|\s" "")]
-    (if (re-find #"\$" s1)
-      (correct-number-ocr (re-find #"\$[0-9OISBL]{1,3}[.|,][0-9OISBL]{0,2}" s1))
-      (clean-money-OLD s))))
+    (cond
+     ; thousands $2,900.00
+     (re-find #"\$[0-9OISBL]{1}[.|,][0-9OISBL]{1,3}[.|,| ][0-9OISBL]{0,2}" s1)
+     (correct-number-ocr
+      (re-find #"\$[0-9OISBL]{1}[.|,][0-9OISBL]{1,3}[.|,| ][0-9OISBL]{0,2}" s1))
+
+     (re-find #"\$[0-9OISBL]{1,3}[.|,| ][0-9OISBL]{0,2}" s1)
+     (correct-number-ocr
+      (re-find #"\$[0-9OISBL]{1,3}[.|,| ][0-9OISBL]{0,2}" s1))
+     (re-find #"\$[0-9OISBL]{1,3}\s+" s1)
+     (correct-number-ocr
+      (re-find #"\$[0-9OISBL]{1,3}" s1))
+     (re-find  #"[0-9ISBL]{1,3}[.|,][0-9ISBL]{1,2}" s1)
+     (correct-number-ocr
+      (re-find #"[0-9ISBL]{1,3}[.|,][0-9ISBL]{1,2}" s1))
+     :else (string/replace s #"[\n|\s|\r|\|]+" ""))))
 
 (defn clean-up
   [scraped-info amount-col-num]
@@ -523,17 +544,22 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 (defn build-config-deltafile
   "Builds delta and saves it (with config), based on a given config"
-  [config config-filename delta-filename]
+  [config-filename delta-filename]
   (do
-    (println "Writing config to:" config-filename)
-    (to-file config-filename config)
+    (println "Reading config from:" config-filename)
+    ;(to-file config-filename config)
     (println "Writing delta to:" delta-filename)
-    (to-file delta-filename (delta-from-config config))))
+    (to-file delta-filename
+             (delta-from-config (from-file  config-filename)))))
 
 (defn scrape-page
   "Scrape data off page in PDF stream, specified by cfg."
   [pg cfg deltas]
-  (restruct (vals-from-deltamaps pg cfg deltas)))
+  (let [collected-vals (vals-from-deltamaps pg cfg deltas)]
+    ; if we only have one row, we don't need to mix rows
+    (if (= 1 (:recs-per-pg cfg))
+      collected-vals
+      (restruct collected-vals))))
 
 (defn scrape-pages
   [stream start end]
@@ -553,6 +579,7 @@
   "Scrape a document, looking at each to dermine if it's a contributor page.
    Uses given config and delta structs."
   [stream config delta range]
+  (println "range:" range)
   (if-not
       (nil? (first range))
     (do
@@ -563,7 +590,10 @@
          (do
            ;; DEBUG OUTPUT
            (println "Extracting contributors on page" n)
-           (scrape-page pg config delta)))))))
+           (scrape-page pg config delta)))))
+    (do
+      (println "Scraping first page only")
+      (scrape-page (get-pg stream 0) config delta))))
 
 ; for convenience in coding ... due to multiproc restrictions
 ; w/ snowtide, it's easier to use a global instance
@@ -597,6 +627,9 @@
                                    "Note: This may fail without warning.")
     :parse-fn #(boolean %)
     :default false]
+   ["-l" "--clean" "Attempt to clean output. Experimental feature."
+    :parse-fn #(boolean %)
+    :default false]
    ["-h"  "--help"]))
 
 (defn usage
@@ -625,6 +658,8 @@
   (println "  config:    " (:config options false))
   (println "  delta:     " (:delta options false))
   (println "  auto-range:" (:auto-range options false))
+  (println "  help:      " (:help options false))
+  (println "  clean:     " (:clean options false))
   (println (count arguments) "Arguments:\n" arguments))
 
 (defn exit
@@ -640,7 +675,8 @@
   (let [[options arguments summary] (parse-args args)]
     (print-info options arguments  summary)
     ;; HELP / USAGE
-    (if (:help options false) (exit 0 (usage summary)))
+    (if (:help options false)
+      (exit 0 (usage summary)))
     ;; MODE (make sure we have a mode and config and delta)
     (if (and (:mode   options false)
              (:config options false)
@@ -663,20 +699,28 @@
                           (= 4 (count arguments)))
                        (range start end)
                        (auto-range stream))]
-         (write-out outfile (clean-up
-                             (scrape-pages-wrapper stream
-                                                   config
-                                                   delta
-                                                   range) 3)))
+         (if (:clean options false)
+           (write-out outfile (clean-up
+                               (scrape-pages-wrapper stream
+                                                     config
+                                                     delta
+                                                     range) 3))
+           (write-out outfile (scrape-pages-wrapper stream
+                                                    config
+                                                    delta
+                                                    range))
+           ))
        ;; CONFIG-BUILD MODE
        (= (:mode options) "config")
        (do
          (println "Entering config mode")
-         (build-config-deltafile (config) (:config options) (:delta options)))
+         (build-config-deltafile (:config options) (:delta options)))
        :else (exit 1 (usage summary))))))
 
 (defn -main
   [& args]
+  (run args)
+  (System/exit 0)
   (let [[options arguments summary] (parse-args args)]
     (println "Selected options:")
     (println "  mode:      " (:mode options false))
@@ -731,7 +775,6 @@
        (= (:mode options) "config")
        (let [nil1 (println "Entering config mode")]
          (build-config-deltafile
-          (config)
           (:config options)
           (:delta options)))
        :else (do (println "options:" options)
