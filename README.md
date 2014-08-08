@@ -1,6 +1,6 @@
-# Parse-TX-CFR
+# Campaign Vulture
 
-An experimental parser for PDF Campaign Finance Reports from the Texas Ethics Commission.
+A clojure-based tool that converts Campaign Finance Report PDFs to CSV
 
 ## Usage
 
